@@ -18,24 +18,25 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
 
       - name: Install Dependencies
-        run: npm install
+        run: npm install --legacy-peer-deps
 
       - name: Build Web Application
         run: npm run build
 
       - name: Build Windows .EXE with Electron Builder
-        run: npx electron-builder --win nsis
+        run: npx electron-builder --win nsis -c.win.signAndEditExecutable=false
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Upload .EXE Installer as Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Cafeteria-POS-Windows-Setup-EXE
           path: dist-electron/*.exe
+          if-no-files-found: error
           retention-days: 30
 
       - name: Create GitHub Release (Optional on Tags)
