@@ -1,0 +1,462 @@
+import React, { useState, useEffect } from 'react';
+import {
+  CafeteriaSettings,
+  TableItem,
+  MenuItem,
+  Station,
+  Order,
+  Staff,
+  LanPrinterConfig,
+} from './types';
+import {
+  getSettings,
+  saveSettings,
+  getTables,
+  saveTables,
+  getMenuItems,
+  saveMenuItems,
+  getStations,
+  saveStations,
+  getOrders,
+  saveOrders,
+  getStaffList,
+  saveStaffList,
+  getLanPrinters,
+  saveLanPrinters,
+  resetAllData,
+  INITIAL_SETTINGS,
+} from './services/storage';
+import { playCashSound, playOrderSound, playAlertSound, playClickSound } from './services/audio';
+import { syncBus, SyncMessage } from './services/sync';
+
+// Components
+import { SetupWizard } from './components/SetupWizard';
+import { Navbar, ActiveTab } from './components/Navbar';
+import { TablesView } from './components/TablesView';
+import { CashierView } from './components/CashierView';
+import { WaiterTabletView } from './components/WaiterTabletView';
+import { KitchenStationView } from './components/KitchenStationView';
+import { MenuManager } from './components/MenuManager';
+import { StaffManager } from './components/StaffManager';
+import { ReportsView } from './components/ReportsView';
+import { LanPrinterSettings } from './components/LanPrinterSettings';
+import { QrCodeModal } from './components/QrCodeModal';
+import { ReceiptPrintView } from './components/ReceiptPrintView';
+import { Laptop, Bell } from 'lucide-react';
+
+export default function App() {
+  // Application Data States
+  const [settings, setSettings] = useState<CafeteriaSettings>(() => getSettings());
+  const [tables, setTables] = useState<TableItem[]>(() =>
+    getTables(settings.totalTables, settings.halls)
+  );
+  const [menuItems, setMenuItems] = useState<MenuItem[]>(() => getMenuItems());
+  const [stations, setStations] = useState<Station[]>(() => getStations());
+  const [orders, setOrders] = useState<Order[]>(() => getOrders());
+  const [staffList, setStaffList] = useState<Staff[]>(() => getStaffList());
+  const [printers, setPrinters] = useState<LanPrinterConfig[]>(() => getLanPrinters());
+
+  // UI Modes & Views
+  // Determine if device opened with ?view=waiter from QR code
+  const [currentMode, setCurrentMode] = useState<'laptop' | 'waiter'>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('view') === 'waiter') {
+        return 'waiter';
+      }
+    }
+    return 'laptop';
+  });
+
+  const [activeTab, setActiveTab] = useState<ActiveTab>('tables');
+  const [selectedTableForCashier, setSelectedTableForCashier] = useState<TableItem | null>(null);
+  const [receiptToPrint, setReceiptToPrint] = useState<Order | null>(null);
+
+  // Modals
+  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [lastNotification, setLastNotification] = useState<string | null>(null);
+
+  // Listen to cross-device / cross-tab real-time sync events
+  useEffect(() => {
+    const unsubscribe = syncBus.subscribe((msg: SyncMessage) => {
+      if (msg.type === 'ORDER_SUBMITTED') {
+        // Waiter placed an order -> Trigger alert sound on Laptop POS
+        if (soundEnabled) {
+          playOrderSound();
+        }
+        setLastNotification(
+          `داواکاری نوێ تۆمارکرا بۆ ${msg.payload.tableName || 'مێز'} لەلایەن ${
+            msg.payload.waiterName || 'گارسۆن'
+          }!`
+        );
+        setTimeout(() => setLastNotification(null), 4000);
+
+        // Reload orders and tables from storage
+        setOrders(getOrders());
+        setTables(getTables(settings.totalTables, settings.halls));
+      } else if (msg.type === 'PAYMENT_COMPLETED') {
+        if (soundEnabled && currentMode === 'laptop') {
+          playCashSound();
+        }
+        setOrders(getOrders());
+        setTables(getTables(settings.totalTables, settings.halls));
+      } else if (msg.type === 'TABLE_ACTIVE_OPEN') {
+        // Update table item's active indicator
+        const targetId = Number(msg.payload.tableId);
+        setTables((prev) =>
+          prev.map((t) =>
+            t.id === targetId ? { ...t, currentDeviceActive: msg.sender } : t
+          )
+        );
+      } else if (msg.type === 'TABLE_ACTIVE_CLOSE') {
+        const targetId = Number(msg.payload.tableId);
+        setTables((prev) =>
+          prev.map((t) =>
+            t.id === targetId ? { ...t, currentDeviceActive: undefined } : t
+          )
+        );
+      } else if (msg.type === 'DATA_RELOAD') {
+        setOrders(getOrders());
+        setTables(getTables(settings.totalTables, settings.halls));
+      }
+    });
+
+    return () => unsubscribe();
+  }, [soundEnabled, currentMode, settings.totalTables, settings.halls]);
+
+  // Handle first-time setup completion
+  const handleSetupComplete = (newSettings: CafeteriaSettings) => {
+    setSettings(newSettings);
+    const initialTables = getTables(newSettings.totalTables, newSettings.halls);
+    setTables(initialTables);
+  };
+
+  // Orders handlers
+  const handleSaveOrder = (order: Order, tableId: number) => {
+    // Upsert order in orders list
+    const existingIndex = orders.findIndex((o) => o.id === order.id);
+    let updatedOrders: Order[];
+    if (existingIndex > -1) {
+      updatedOrders = [...orders];
+      updatedOrders[existingIndex] = order;
+    } else {
+      updatedOrders = [order, ...orders];
+    }
+    setOrders(updatedOrders);
+    saveOrders(updatedOrders);
+
+    // Update table status to occupied
+    const updatedTables = tables.map((t) =>
+      t.id === tableId
+        ? {
+            ...t,
+            status: 'occupied' as const,
+            activeOrderId: order.id,
+            activeGuests: t.activeGuests || 2,
+          }
+        : t
+    );
+    setTables(updatedTables);
+    saveTables(updatedTables);
+    setReceiptToPrint(order);
+  };
+
+  const handleCompletePayment = (
+    finalOrder: Order,
+    tableId: number,
+    cashReceived: number,
+    change: number
+  ) => {
+    // 1. Mark order as completed
+    const existingIndex = orders.findIndex((o) => o.id === finalOrder.id);
+    let updatedOrders: Order[];
+    if (existingIndex > -1) {
+      updatedOrders = [...orders];
+      updatedOrders[existingIndex] = finalOrder;
+    } else {
+      updatedOrders = [finalOrder, ...orders];
+    }
+    setOrders(updatedOrders);
+    saveOrders(updatedOrders);
+
+    // 2. Clear table and reset to available
+    const updatedTables = tables.map((t) =>
+      t.id === tableId
+        ? {
+            ...t,
+            status: 'available' as const,
+            activeOrderId: undefined,
+            activeGuests: 0,
+            currentDeviceActive: undefined,
+          }
+        : t
+    );
+    setTables(updatedTables);
+    saveTables(updatedTables);
+
+    // 3. Set receipt for printing
+    setReceiptToPrint(finalOrder);
+  };
+
+  // Table add/delete
+  const handleAddTable = (name: string, hall: string, capacity: number) => {
+    const newId = tables.length > 0 ? Math.max(...tables.map((t) => t.id)) + 1 : 1;
+    const newTable: TableItem = {
+      id: newId,
+      name,
+      hall,
+      capacity,
+      status: 'available',
+    };
+    const updated = [...tables, newTable];
+    setTables(updated);
+    saveTables(updated);
+  };
+
+  const handleDeleteTable = (tableId: number) => {
+    const updated = tables.filter((t) => t.id !== tableId);
+    setTables(updated);
+    saveTables(updated);
+  };
+
+  // Kitchen item status update
+  const handleUpdateItemStatus = (
+    orderId: string,
+    itemId: string,
+    newStatus: 'pending' | 'preparing' | 'ready' | 'served'
+  ) => {
+    const updated = orders.map((o) => {
+      if (o.id !== orderId) return o;
+      return {
+        ...o,
+        items: o.items.map((i) => (i.id === itemId ? { ...i, status: newStatus } : i)),
+      };
+    });
+    setOrders(updated);
+    saveOrders(updated);
+  };
+
+  // Stations add/delete
+  const handleAddStation = (name: string, description: string, ip: string) => {
+    const id = `st_${Date.now()}`;
+    const newStation: Station = {
+      id,
+      name,
+      icon: 'ChefHat',
+      color: 'from-purple-600 to-indigo-600',
+      printerIp: ip || '192.168.1.205',
+      printerPort: 9100,
+      autoPrint: true,
+      description,
+    };
+    const updated = [...stations, newStation];
+    setStations(updated);
+    saveStations(updated);
+  };
+
+  const handleDeleteStation = (stationId: string) => {
+    const updated = stations.filter((s) => s.id !== stationId);
+    setStations(updated);
+    saveStations(updated);
+  };
+
+  // Reset entire system to blank slate
+  const handleResetData = () => {
+    resetAllData();
+    setSettings(INITIAL_SETTINGS);
+    setTables([]);
+    setOrders([]);
+  };
+
+  // IF SYSTEM IS NOT YET CONFIGURED / ACTIVATED -> Show Installation Wizard
+  if (!settings.isConfigured || !settings.isActivated) {
+    return (
+      <SetupWizard
+        initialSettings={settings}
+        onComplete={handleSetupComplete}
+      />
+    );
+  }
+
+  // Count pending items across all stations
+  const pendingKitchenCount = orders
+    .filter((o) => o.status === 'active')
+    .flatMap((o) => o.items)
+    .filter((i) => i.status !== 'ready').length;
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none">
+      {/* Real-time Order Alert Toast */}
+      {lastNotification && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-bold px-5 py-2.5 rounded-2xl shadow-2xl flex items-center gap-2 text-xs border border-amber-300 animate-in slide-in-from-top-4 duration-200">
+          <Bell className="w-4 h-4 animate-bounce" />
+          <span>{lastNotification}</span>
+        </div>
+      )}
+
+      {/* Main Switch: WAITER TABLET MODE vs LAPTOP POS MODE */}
+      {currentMode === 'waiter' ? (
+        <div className="relative min-h-screen">
+          {/* Switch back to Laptop POS Floating Button */}
+          <button
+            type="button"
+            onClick={() => {
+              playClickSound();
+              setCurrentMode('laptop');
+            }}
+            className="fixed bottom-4 left-4 z-40 bg-slate-900 hover:bg-slate-800 text-amber-400 border border-slate-700 px-3.5 py-2 rounded-xl text-xs font-bold shadow-xl flex items-center gap-1.5 transition"
+          >
+            <Laptop className="w-4 h-4" />
+            <span>گۆڕین بۆ لاپتۆپ و کاشێر</span>
+          </button>
+
+          <WaiterTabletView
+            tables={tables}
+            menuItems={menuItems}
+            stations={stations}
+            staffList={staffList}
+            settings={settings}
+            activeOrders={orders}
+            onSaveOrder={handleSaveOrder}
+            onTableActiveChange={(tableId, device) => {
+              setTables((prev) =>
+                prev.map((t) => (t.id === tableId ? { ...t, currentDeviceActive: device || undefined } : t))
+              );
+            }}
+          />
+        </div>
+      ) : (
+        /* LAPTOP POS INTERFACE */
+        <div className="flex-1 flex flex-col">
+          {/* Navbar */}
+          <Navbar
+            activeTab={activeTab}
+            onTabChange={(tab) => {
+              playClickSound();
+              setActiveTab(tab);
+            }}
+            settings={settings}
+            onOpenQrModal={() => setIsQrModalOpen(true)}
+            pendingKitchenCount={pendingKitchenCount}
+            soundEnabled={soundEnabled}
+            onToggleSound={() => {
+              setSoundEnabled(!soundEnabled);
+              if (!soundEnabled) playCashSound();
+            }}
+          />
+
+          {/* Main Tab Content */}
+          <main className="flex-1 p-4 md:p-6 max-w-7xl mx-auto w-full">
+            {activeTab === 'tables' && (
+              <TablesView
+                tables={tables}
+                activeOrders={orders}
+                settings={settings}
+                onSelectTable={(table) => {
+                  playClickSound();
+                  setSelectedTableForCashier(table);
+                  // Notify that laptop is on this table
+                  syncBus.publish('TABLE_ACTIVE_OPEN', 'laptop', {
+                    tableId: table.id,
+                    tableName: table.name,
+                  });
+                }}
+                onAddTable={handleAddTable}
+                onDeleteTable={handleDeleteTable}
+              />
+            )}
+
+            {activeTab === 'kitchen' && (
+              <KitchenStationView
+                stations={stations}
+                orders={orders}
+                settings={settings}
+                menuItems={menuItems}
+                onAddStation={handleAddStation}
+                onDeleteStation={handleDeleteStation}
+              />
+            )}
+
+            {activeTab === 'reports' && (
+              <ReportsView
+                orders={orders}
+                stations={stations}
+                settings={settings}
+              />
+            )}
+
+            {activeTab === 'menu' && (
+              <MenuManager
+                menuItems={menuItems}
+                stations={stations}
+                settings={settings}
+                onSaveMenuItems={(items) => {
+                  setMenuItems(items);
+                  saveMenuItems(items);
+                }}
+              />
+            )}
+
+            {activeTab === 'staff' && (
+              <StaffManager
+                staffList={staffList}
+                onSaveStaffList={(list) => {
+                  setStaffList(list);
+                  saveStaffList(list);
+                }}
+              />
+            )}
+
+            {activeTab === 'printers' && (
+              <LanPrinterSettings
+                printers={printers}
+                onSavePrinters={(prList) => {
+                  setPrinters(prList);
+                  saveLanPrinters(prList);
+                }}
+              />
+            )}
+          </main>
+        </div>
+      )}
+
+      {/* Cashier Billing Modal */}
+      {selectedTableForCashier && (
+        <CashierView
+          table={selectedTableForCashier}
+          order={
+            orders.find(
+              (o) => o.tableId === selectedTableForCashier.id && o.status === 'active'
+            ) || null
+          }
+          menuItems={menuItems}
+          stations={stations}
+          staffList={staffList}
+          settings={settings}
+          onClose={() => {
+            syncBus.publish('TABLE_ACTIVE_CLOSE', 'laptop', {
+              tableId: selectedTableForCashier.id,
+            });
+            setSelectedTableForCashier(null);
+          }}
+          onSaveOrder={handleSaveOrder}
+          onCompletePayment={handleCompletePayment}
+        />
+      )}
+
+      {/* QR Code Modal for Waiter Tablet */}
+      <QrCodeModal
+        isOpen={isQrModalOpen}
+        onClose={() => setIsQrModalOpen(false)}
+      />
+
+      {/* Hidden Thermal Receipt Print Container (Prints automatically when window.print() is called) */}
+      <ReceiptPrintView
+        order={receiptToPrint}
+        settings={settings}
+        cashierName={staffList.find((s) => s.role === 'cashier')?.name || 'کاشێری سەرەکی'}
+      />
+    </div>
+  );
+}

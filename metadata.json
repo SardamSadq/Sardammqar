@@ -1,0 +1,6 @@
+{
+  "name": "سیستەمی کافتریا و ڕێستۆرانت (POS & Waiter Hub)",
+  "description": "سیستەمی بەڕێوەبردنی کافتریا و چێشتخانە، کاشێر، مێزەکان، تابلێتی گارسۆن لە ڕێگەی QR، کۆنترۆڵی بەشەکانی نێرگەلە، ساردی و چێشتخانە لەگەڵ پرینتەری LAN و داهاتی ڕۆژانە",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
