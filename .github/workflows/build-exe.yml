@@ -20,9 +20,15 @@ jobs:
           node-version: 20
 
       - name: Install Dependencies
-        run: npm install --legacy-peer-deps
+        shell: bash
+        run: |
+          rm -f package-lock.json
+          npm install --legacy-peer-deps
+          node -e "try { const v = require('./node_modules/rolldown/package.json').version; console.log('Installing @rolldown/binding-win32-x64-msvc@' + v); require('child_process').execSync('npm install --no-save @rolldown/binding-win32-x64-msvc@' + v, {stdio: 'inherit'}); } catch(e) { console.warn(e); }"
+          npm install --no-save @esbuild/win32-x64 || true
 
       - name: Build Web Application
+        shell: bash
         run: npm run build
 
       - name: Build Windows .EXE with Electron Builder
