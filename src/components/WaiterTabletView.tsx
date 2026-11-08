@@ -60,6 +60,13 @@ export const WaiterTabletView: React.FC<WaiterTabletViewProps> = ({
   const [guestCount, setGuestCount] = useState<number>(2);
   const [orderSentSuccess, setOrderSentSuccess] = useState(false);
   const [selectedHall, setSelectedHall] = useState<string>('all');
+  const [lanConnected, setLanConnected] = useState<boolean>(syncBus.isConnected);
+
+  useEffect(() => {
+    return syncBus.onConnectionChange((connected) => {
+      setLanConnected(connected);
+    });
+  }, []);
 
   // Load existing order for the selected table if any
   useEffect(() => {
@@ -225,9 +232,17 @@ export const WaiterTabletView: React.FC<WaiterTabletViewProps> = ({
           <div>
             <h1 className="font-bold text-base text-white flex items-center gap-2">
               <span>تابلێتی گارسۆن</span>
-              <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                بەستراوە بە سیستەم
-              </span>
+              {lanConnected ? (
+                <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  سیرڤەری لاپتۆپ: بەستراوە
+                </span>
+              ) : (
+                <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                  لە پەیوەندیدایە...
+                </span>
+              )}
             </h1>
             <p className="text-xs text-slate-400">
               {settings.name || 'کافتریا'} • گارسۆن: <span className="text-amber-400">{selectedWaiter}</span>

@@ -77,6 +77,53 @@ export default function App() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [lastNotification, setLastNotification] = useState<string | null>(null);
 
+  // Initial load: Fetch existing state from local LAN server (vital for waiter tablet)
+  useEffect(() => {
+    syncBus.fetchStateFromServer().then((serverState) => {
+      if (serverState) {
+        if (serverState.settings?.name) {
+          setSettings(serverState.settings);
+          saveSettings(serverState.settings);
+        }
+        if (Array.isArray(serverState.tables) && serverState.tables.length > 0) {
+          setTables(serverState.tables);
+          saveTables(serverState.tables);
+        }
+        if (Array.isArray(serverState.menu) && serverState.menu.length > 0) {
+          setMenuItems(serverState.menu);
+          saveMenuItems(serverState.menu);
+        }
+        if (Array.isArray(serverState.stations) && serverState.stations.length > 0) {
+          setStations(serverState.stations);
+          saveStations(serverState.stations);
+        }
+        if (Array.isArray(serverState.staff) && serverState.staff.length > 0) {
+          setStaffList(serverState.staff);
+          saveStaffList(serverState.staff);
+        }
+        if (Array.isArray(serverState.orders) && serverState.orders.length > 0) {
+          setOrders(serverState.orders);
+          saveOrders(serverState.orders);
+        }
+      }
+    });
+  }, []);
+
+  // Laptop pushes state updates to local server so any connected tablet receives it
+  useEffect(() => {
+    if (currentMode === 'laptop' && settings.name) {
+      syncBus.pushStateToServer({
+        settings,
+        tables,
+        menu: menuItems,
+        stations,
+        orders,
+        staff: staffList,
+        printers,
+      });
+    }
+  }, [settings, tables, menuItems, stations, orders, staffList, printers, currentMode]);
+
   // Listen to cross-device / cross-tab real-time sync events
   useEffect(() => {
     const unsubscribe = syncBus.subscribe((msg: SyncMessage) => {
@@ -92,15 +139,30 @@ export default function App() {
         );
         setTimeout(() => setLastNotification(null), 4000);
 
-        // Reload orders and tables from storage
-        setOrders(getOrders());
-        setTables(getTables(settings.totalTables, settings.halls));
+        // If message has order payload, save it directly
+        if (msg.payload.order && msg.payload.tableId) {
+          const incomingOrder = msg.payload.order as Order;
+          const incomingTableId = Number(msg.payload.tableId);
+          handleSaveOrder(incomingOrder, incomingTableId);
+        } else {
+          setOrders(getOrders());
+          setTables(getTables(settings.totalTables, settings.halls));
+        }
       } else if (msg.type === 'PAYMENT_COMPLETED') {
         if (soundEnabled && currentMode === 'laptop') {
           playCashSound();
         }
+        if (msg.payload.tableId) {
+          const paidTableId = Number(msg.payload.tableId);
+          setTables((prev) =>
+            prev.map((t) =>
+              t.id === paidTableId
+                ? { ...t, status: 'available', activeOrderId: undefined }
+                : t
+            )
+          );
+        }
         setOrders(getOrders());
-        setTables(getTables(settings.totalTables, settings.halls));
       } else if (msg.type === 'TABLE_ACTIVE_OPEN') {
         // Update table item's active indicator
         const targetId = Number(msg.payload.tableId);
@@ -117,13 +179,21 @@ export default function App() {
           )
         );
       } else if (msg.type === 'DATA_RELOAD') {
-        setOrders(getOrders());
-        setTables(getTables(settings.totalTables, settings.halls));
+        syncBus.fetchStateFromServer().then((serverState) => {
+          if (serverState) {
+            if (serverState.tables) setTables(serverState.tables);
+            if (serverState.menu) setMenuItems(serverState.menu);
+            if (serverState.orders) setOrders(serverState.orders);
+          } else {
+            setOrders(getOrders());
+            setTables(getTables(settings.totalTables, settings.halls));
+          }
+        });
       }
     });
 
     return () => unsubscribe();
-  }, [soundEnabled, currentMode, settings.totalTables, settings.halls]);
+  }, [soundEnabled, currentMode, settings.totalTables, settings.halls, tables, orders]);
 
   // Handle first-time setup completion
   const handleSetupComplete = (newSettings: CafeteriaSettings) => {
@@ -415,6 +485,7 @@ export default function App() {
                   setPrinters(prList);
                   saveLanPrinters(prList);
                 }}
+                onOpenQrModal={() => setIsQrModalOpen(true)}
               />
             )}
           </main>

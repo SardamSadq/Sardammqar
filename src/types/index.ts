@@ -104,3 +104,24 @@ export interface LanPrinterConfig {
   lastTestStatus?: 'success' | 'failed' | 'idle';
   lastTestedAt?: string;
 }
+
+export interface LanServerInfo {
+  preferredIp: string;
+  port: number;
+  waiterUrl: string;
+  cashierUrl: string;
+  allIps: Array<{ name: string; ip: string }>;
+  connectedTablets: number;
+}
+
+declare global {
+  interface Window {
+    electronPOS?: {
+      isElectron: boolean;
+      printReceipt: (options?: { silent?: boolean; printerName?: string }) => void;
+      getLanServerInfo: () => Promise<LanServerInfo>;
+      broadcastSync: (msg: unknown) => void;
+      onSyncEvent: (cb: (msg: unknown) => void) => () => void;
+    };
+  }
+}

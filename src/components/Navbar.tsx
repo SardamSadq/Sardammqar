@@ -175,8 +175,10 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             type="button"
             onClick={onOpenQrModal}
-            className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition"
+            className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 rounded-xl text-xs font-bold flex items-center gap-2 transition"
+            title="سیرڤەری LAN چالاکە - کلیک بکە بۆ نیشاندانی کۆدی QR بۆ تابلێتی گارسۆن"
           >
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <QrCode className="w-4 h-4" />
             <span>QR تابلێتی گارسۆن</span>
           </button>

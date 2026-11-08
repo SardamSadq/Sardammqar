@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { LanPrinterConfig } from '../types';
+import React, { useState, useEffect } from 'react';
+import { LanPrinterConfig, LanServerInfo } from '../types';
 import {
   Printer,
   Wifi,
@@ -11,18 +11,28 @@ import {
   AlertTriangle,
   Send,
   Save,
+  Tablet,
+  QrCode,
 } from 'lucide-react';
 import { playClickSound, playAlertSound } from '../services/audio';
+import { syncBus } from '../services/sync';
 
 interface LanPrinterSettingsProps {
   printers: LanPrinterConfig[];
   onSavePrinters: (printers: LanPrinterConfig[]) => void;
+  onOpenQrModal?: () => void;
 }
 
 export const LanPrinterSettings: React.FC<LanPrinterSettingsProps> = ({
   printers,
   onSavePrinters,
+  onOpenQrModal,
 }) => {
+  const [lanInfo, setLanInfo] = useState<LanServerInfo | null>(null);
+
+  useEffect(() => {
+    syncBus.getLanInfo().then(setLanInfo).catch(() => {});
+  }, []);
   const [printerList, setPrinterList] = useState<LanPrinterConfig[]>(printers);
   const [testingIndex, setTestingIndex] = useState<number | null>(null);
   const [testResult, setTestResult] = useState<{
@@ -148,6 +158,38 @@ export const LanPrinterSettings: React.FC<LanPrinterSettingsProps> = ({
           ڕێکخستنی پرینتەرەکان بە سەرکەوتوویی پاشەکەوت کرا!
         </div>
       )}
+
+      {/* Local LAN Server & Waiter Tablet Connection Card */}
+      <div className="bg-gradient-to-r from-slate-900 to-slate-950 border border-slate-800 p-5 rounded-2xl shadow-xl flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold shadow-inner">
+            <Tablet className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="font-bold text-sm text-white">سیرڤەری ناوخۆیی بۆ تابلێتی گارسۆنەکان (Local LAN Server)</h3>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 font-bold">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                چالاکە
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 mt-1">
+              ناونیشانی پەیوەستبوون لەسەر وایفای: <span className="text-amber-400 font-mono font-bold">http://{lanInfo?.preferredIp || '192.168.1.XXX'}:{lanInfo?.port || 3000}/?view=waiter</span>
+            </p>
+          </div>
+        </div>
+
+        {onOpenQrModal && (
+          <button
+            type="button"
+            onClick={onOpenQrModal}
+            className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 shadow-lg transition shrink-0"
+          >
+            <QrCode className="w-4 h-4" />
+            <span>پیشاندانی کۆدی QR</span>
+          </button>
+        )}
+      </div>
 
       {/* Guide Note */}
       <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex items-start gap-3 text-xs text-amber-200/90 leading-relaxed">
