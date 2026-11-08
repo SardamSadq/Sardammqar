@@ -10,7 +10,9 @@ export type SyncEventType =
   | 'ORDER_SUBMITTED'
   | 'PAYMENT_COMPLETED'
   | 'DATA_RELOAD'
-  | 'PRINTER_TEST';
+  | 'PRINTER_TEST'
+  | 'BILL_REQUESTED'
+  | 'BILL_PRINTED';
 
 export interface SyncMessage {
   type: SyncEventType;

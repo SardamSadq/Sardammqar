@@ -31,6 +31,8 @@ export interface TableItem {
   currentDeviceActive?: string; // 'laptop' | 'waiter_tablet' | null
   lastUpdated?: string;
   assignedWaiter?: string;
+  billRequestedByWaiter?: string;
+  billRequestedAt?: string;
 }
 
 export interface OrderItem {

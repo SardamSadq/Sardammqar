@@ -24,9 +24,14 @@ import {
   Search,
   User,
   RotateCcw,
+  Receipt,
+  FileText,
+  LogOut,
+  Bell,
 } from 'lucide-react';
 import { syncBus } from '../services/sync';
 import { playClickSound, playAlertSound } from '../services/audio';
+import { PinLoginModal } from './PinLoginModal';
 
 interface WaiterTabletViewProps {
   tables: TableItem[];
@@ -49,11 +54,20 @@ export const WaiterTabletView: React.FC<WaiterTabletViewProps> = ({
   onSaveOrder,
   onTableActiveChange,
 }) => {
+  // Waiter Authentication with PIN
+  const [loggedInWaiter, setLoggedInWaiter] = useState<Staff | null>(() => {
+    if (typeof window !== 'undefined') {
+      const savedId = sessionStorage.getItem('cafeteria_waiter_id');
+      if (savedId) {
+        const found = staffList.find((s) => s.id === savedId && s.active);
+        if (found) return found;
+      }
+    }
+    return null;
+  });
+
   // Waiter flow state
   const [selectedTable, setSelectedTable] = useState<TableItem | null>(null);
-  const [selectedWaiter, setSelectedWaiter] = useState<string>(
-    staffList.find((s) => s.role === 'waiter')?.name || 'گارسۆن ١'
-  );
   const [currentCart, setCurrentCart] = useState<OrderItem[]>([]);
   const [selectedStationFilter, setSelectedStationFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -61,6 +75,7 @@ export const WaiterTabletView: React.FC<WaiterTabletViewProps> = ({
   const [orderSentSuccess, setOrderSentSuccess] = useState(false);
   const [selectedHall, setSelectedHall] = useState<string>('all');
   const [lanConnected, setLanConnected] = useState<boolean>(syncBus.isConnected);
+  const [billRequestedMessage, setBillRequestedMessage] = useState<string | null>(null);
 
   useEffect(() => {
     return syncBus.onConnectionChange((connected) => {
@@ -83,9 +98,6 @@ export const WaiterTabletView: React.FC<WaiterTabletViewProps> = ({
       );
       if (existing) {
         setCurrentCart([...existing.items]);
-        if (existing.waiterName) {
-          setSelectedWaiter(existing.waiterName);
-        }
       } else {
         setCurrentCart([]);
       }
@@ -121,7 +133,7 @@ export const WaiterTabletView: React.FC<WaiterTabletViewProps> = ({
       setCurrentCart(updated);
     } else {
       const newItem: OrderItem = {
-        id: `oi_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        id: `orditem_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         menuItemId: item.id,
         name: item.name,
         price: item.price,
@@ -159,8 +171,9 @@ export const WaiterTabletView: React.FC<WaiterTabletViewProps> = ({
     setCurrentCart(updated);
   };
 
+  // Submit Order from Waiter
   const handleSendOrder = () => {
-    if (!selectedTable || currentCart.length === 0) return;
+    if (!selectedTable || currentCart.length === 0 || !loggedInWaiter) return;
 
     const subtotal = currentCart.reduce((sum, item) => sum + item.price * item.quantity, 0);
     const total = subtotal;
@@ -175,7 +188,8 @@ export const WaiterTabletView: React.FC<WaiterTabletViewProps> = ({
       tableId: selectedTable.id,
       tableName: selectedTable.name,
       hallName: selectedTable.hall,
-      waiterName: selectedWaiter,
+      waiterName: loggedInWaiter.name,
+      waiterId: loggedInWaiter.id,
       items: currentCart,
       subtotal,
       discount: existingOrder?.discount || 0,
@@ -191,7 +205,8 @@ export const WaiterTabletView: React.FC<WaiterTabletViewProps> = ({
     syncBus.publish('ORDER_SUBMITTED', 'waiter_tablet', {
       tableId: selectedTable.id,
       tableName: selectedTable.name,
-      waiterName: selectedWaiter,
+      waiterName: loggedInWaiter.name,
+      waiterId: loggedInWaiter.id,
       order: newOrder,
     });
 
@@ -203,6 +218,52 @@ export const WaiterTabletView: React.FC<WaiterTabletViewProps> = ({
       setOrderSentSuccess(false);
     }, 1800);
   };
+
+  // Request Bill / Receipt from Cashier
+  const handleRequestBill = (table: TableItem) => {
+    if (!loggedInWaiter) return;
+    playClickSound();
+
+    // Broadcast BILL_REQUESTED event to Laptop Cashier
+    syncBus.publish('BILL_REQUESTED', 'waiter_tablet', {
+      tableId: table.id,
+      tableName: table.name,
+      waiterName: loggedInWaiter.name,
+      waiterId: loggedInWaiter.id,
+      activeOrderId: table.activeOrderId,
+      timestamp: Date.now(),
+    });
+
+    playAlertSound();
+    setBillRequestedMessage(`داواکاری وەسڵ بۆ ${table.name} بە سەرکەوتوویی نێردرا بۆ کاشێر 🧾`);
+    setTimeout(() => setBillRequestedMessage(null), 4000);
+  };
+
+  const handleLogoutWaiter = () => {
+    playClickSound();
+    try {
+      sessionStorage.removeItem('cafeteria_waiter_id');
+    } catch {}
+    setLoggedInWaiter(null);
+  };
+
+  // If not logged in with PIN, show PIN Login Modal
+  if (!loggedInWaiter) {
+    return (
+      <PinLoginModal
+        isOpen={true}
+        mode="waiter"
+        staffList={staffList}
+        cafeteriaName={settings.name}
+        onLogin={(staff) => {
+          setLoggedInWaiter(staff);
+          try {
+            sessionStorage.setItem('cafeteria_waiter_id', staff.id);
+          } catch {}
+        }}
+      />
+    );
+  }
 
   // Filter menu items
   const filteredItems = menuItems.filter((item) => {
@@ -216,7 +277,6 @@ export const WaiterTabletView: React.FC<WaiterTabletViewProps> = ({
 
   const cartTotal = currentCart.reduce((acc, i) => acc + i.price * i.quantity, 0);
 
-  // Group items in cart by station so waiter can see routing
   const getStationName = (stId: string) => {
     return stations.find((s) => s.id === stId)?.name || 'بەشی سەرەکی';
   };
@@ -245,29 +305,37 @@ export const WaiterTabletView: React.FC<WaiterTabletViewProps> = ({
               )}
             </h1>
             <p className="text-xs text-slate-400">
-              {settings.name || 'کافتریا'} • گارسۆن: <span className="text-amber-400">{selectedWaiter}</span>
+              {settings.name || 'کافتریا'} • بەشی گارسۆنەکان
             </p>
           </div>
         </div>
 
-        {/* Waiter Switcher */}
+        {/* Logged in Waiter & Logout Button */}
         <div className="flex items-center gap-2">
-          <User className="w-4 h-4 text-slate-400" />
-          <select
-            value={selectedWaiter}
-            onChange={(e) => setSelectedWaiter(e.target.value)}
-            className="bg-slate-800 border border-slate-700 text-xs rounded-lg px-2.5 py-1.5 text-white focus:outline-none focus:border-amber-500"
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-bold shadow-sm">
+            <User className="w-3.5 h-3.5 text-amber-400" />
+            <span>گارسۆن: {loggedInWaiter.name}</span>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleLogoutWaiter}
+            className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-950/60 hover:text-rose-400 border border-slate-700 text-slate-300 text-xs font-medium transition flex items-center gap-1"
+            title="دەرچوون لەم تابلێتە بۆ ئەوەی گارسۆنێکی تر بە پاسۆرد بچێتەژوورەوە"
           >
-            {staffList
-              .filter((s) => s.role === 'waiter' || s.role === 'cashier')
-              .map((st) => (
-                <option key={st.id} value={st.name}>
-                  {st.name}
-                </option>
-              ))}
-          </select>
+            <LogOut className="w-3.5 h-3.5" />
+            <span>دەرچوون</span>
+          </button>
         </div>
       </header>
+
+      {/* Bill Request Alert Banner */}
+      {billRequestedMessage && (
+        <div className="bg-amber-500 text-slate-950 px-4 py-2.5 text-xs font-bold text-center flex items-center justify-center gap-2 shadow-lg animate-in slide-in-from-top">
+          <Receipt className="w-4 h-4" />
+          <span>{billRequestedMessage}</span>
+        </div>
+      )}
 
       {/* Main Content Area: STEP 1: Select Table OR STEP 2: Make Order */}
       {!selectedTable ? (
@@ -324,15 +392,14 @@ export const WaiterTabletView: React.FC<WaiterTabletViewProps> = ({
                 const isLaptopActive = table.currentDeviceActive === 'laptop';
 
                 return (
-                  <button
+                  <div
                     key={table.id}
-                    type="button"
                     onClick={() => handleSelectTable(table)}
-                    className={`relative p-4 rounded-2xl border text-right transition-all transform active:scale-95 flex flex-col justify-between h-36 ${
+                    className={`relative p-3.5 rounded-2xl border text-right transition-all transform active:scale-95 flex flex-col justify-between h-40 cursor-pointer ${
                       isBilling
-                        ? 'bg-rose-950/40 border-rose-600/50 hover:border-rose-500'
+                        ? 'bg-rose-950/40 border-rose-500 shadow-rose-950/50 shadow-lg'
                         : isOccupied
-                        ? 'bg-amber-950/30 border-amber-500/50 hover:border-amber-400'
+                        ? 'bg-amber-950/30 border-amber-500/60 hover:border-amber-400'
                         : 'bg-slate-900 border-slate-800 hover:border-slate-700'
                     }`}
                   >
@@ -340,15 +407,15 @@ export const WaiterTabletView: React.FC<WaiterTabletViewProps> = ({
                     {isLaptopActive && (
                       <div className="absolute top-2 left-2 flex items-center gap-1 bg-sky-500/20 text-sky-300 border border-sky-400/30 text-[10px] px-2 py-0.5 rounded-full animate-pulse">
                         <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-ping" />
-                        کاشێر لەسەریەتی
+                        کاشێر
                       </div>
                     )}
 
                     <div className="flex items-start justify-between">
-                      <div className="w-9 h-9 rounded-xl bg-slate-800 flex items-center justify-center font-bold text-sm text-amber-400 border border-slate-700">
+                      <div className="w-8 h-8 rounded-xl bg-slate-800 flex items-center justify-center font-bold text-sm text-amber-400 border border-slate-700">
                         {table.id}
                       </div>
-                      <span className="text-[11px] text-slate-400 truncate max-w-[80px]">
+                      <span className="text-[10px] text-slate-400 truncate max-w-[70px]">
                         {table.hall}
                       </span>
                     </div>
@@ -359,26 +426,48 @@ export const WaiterTabletView: React.FC<WaiterTabletViewProps> = ({
                         <span
                           className={`font-semibold ${
                             isBilling
-                              ? 'text-rose-400'
+                              ? 'text-rose-400 animate-pulse font-bold'
                               : isOccupied
                               ? 'text-amber-400'
                               : 'text-emerald-400'
                           }`}
                         >
                           {isBilling
-                            ? 'داوای حیساب'
+                            ? '🧾 داوای وەسڵ'
                             : isOccupied
                             ? 'پڕە'
                             : 'بەتاڵە'}
                         </span>
                         {isOccupied && (
-                          <span className="text-slate-400">
+                          <span className="text-slate-400 text-[10px]">
                             {table.activeGuests || 2} کەس
                           </span>
                         )}
                       </div>
                     </div>
-                  </button>
+
+                    {/* Quick Bill Request button directly on table card if occupied */}
+                    {isOccupied && !isBilling && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRequestBill(table);
+                        }}
+                        className="w-full py-1 px-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[10px] font-bold flex items-center justify-center gap-1 transition"
+                        title="داواکردنی پسوڵە بۆ ئەم مێزە"
+                      >
+                        <Receipt className="w-3 h-3" />
+                        <span>داوای وەسڵ</span>
+                      </button>
+                    )}
+
+                    {isBilling && (
+                      <div className="text-[10px] text-center font-bold text-rose-300 bg-rose-500/20 py-0.5 rounded-md border border-rose-500/30">
+                        چاوەڕوانی کاشێرە...
+                      </div>
+                    )}
+                  </div>
                 );
               })}
           </div>
@@ -388,174 +477,161 @@ export const WaiterTabletView: React.FC<WaiterTabletViewProps> = ({
         <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
           {/* Menu Catalog (Left/Center in RTL) */}
           <div className="flex-1 flex flex-col p-4 overflow-y-auto space-y-4">
-            {/* Top Bar with Return & Table Info */}
-            <div className="bg-slate-900 p-3.5 rounded-2xl border border-slate-800 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={handleBackToTables}
-                  className="p-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-200 transition flex items-center gap-1.5 text-xs font-bold"
-                >
-                  <ArrowRight className="w-4 h-4" />
-                  مێزەکان
-                </button>
-                <div>
-                  <h2 className="text-base font-bold text-white flex items-center gap-2">
-                    <span className="text-amber-400 font-extrabold">{selectedTable.name}</span>
-                    <span className="text-xs text-slate-400">({selectedTable.hall})</span>
-                  </h2>
-                </div>
-              </div>
-
-              {/* Guest Count Selector */}
-              <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
-                <span className="text-xs text-slate-400">ژمارەی کەس:</span>
-                <button
-                  type="button"
-                  onClick={() => setGuestCount(Math.max(1, guestCount - 1))}
-                  className="w-6 h-6 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-bold text-slate-200 flex items-center justify-center"
-                >
-                  -
-                </button>
-                <span className="text-xs font-bold text-amber-400 w-4 text-center">
-                  {guestCount}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setGuestCount(guestCount + 1)}
-                  className="w-6 h-6 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-bold text-slate-200 flex items-center justify-center"
-                >
-                  +
-                </button>
-              </div>
-
-              {/* Live Badge if Laptop Cashier is also open on this table */}
-              {selectedTable.currentDeviceActive === 'laptop' && (
-                <div className="flex items-center gap-1.5 px-3 py-1 bg-sky-500/10 border border-sky-500/30 text-sky-400 text-xs rounded-xl animate-pulse">
-                  <AlertTriangle className="w-4 h-4 text-sky-400" />
-                  <span>لاپتۆپی کاشێریش ئەم مێزەی کردۆتەوە!</span>
-                </div>
-              )}
-            </div>
-
-            {/* Station / Category Tabs */}
-            <div className="flex items-center gap-2 overflow-x-auto pb-1">
+            {/* Top Toolbar: Back Button & Station Filters */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-900 p-3 rounded-2xl border border-slate-800">
               <button
                 type="button"
-                onClick={() => setSelectedStationFilter('all')}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
-                  selectedStationFilter === 'all'
-                    ? 'bg-amber-500 text-slate-950 shadow-md'
-                    : 'bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800'
-                }`}
+                onClick={handleBackToTables}
+                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold flex items-center gap-2 transition"
               >
-                هەموو بەشەکان
+                <ArrowRight className="w-4 h-4" />
+                <span>گەڕانەوە بۆ مێزەکان ({selectedTable.name})</span>
               </button>
-              {stations.map((st) => (
+
+              {/* Station Filter Pills */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
                 <button
-                  key={st.id}
                   type="button"
-                  onClick={() => setSelectedStationFilter(st.id)}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap flex items-center gap-1.5 ${
-                    selectedStationFilter === st.id
-                      ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 shadow-md'
-                      : 'bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800'
+                  onClick={() => setSelectedStationFilter('all')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition ${
+                    selectedStationFilter === 'all'
+                      ? 'bg-amber-500 text-slate-950 shadow'
+                      : 'bg-slate-800 text-slate-400 hover:text-white'
                   }`}
                 >
-                  {st.id === 'nargile' && <Flame className="w-3.5 h-3.5 text-amber-400" />}
-                  {st.id === 'cold' && <Coffee className="w-3.5 h-3.5 text-cyan-400" />}
-                  {st.id === 'kitchen' && <Utensils className="w-3.5 h-3.5 text-emerald-400" />}
-                  <span>{st.name}</span>
+                  هەموو بەشەکان
                 </button>
-              ))}
+                {stations.map((st) => (
+                  <button
+                    key={st.id}
+                    type="button"
+                    onClick={() => setSelectedStationFilter(st.id)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition flex items-center gap-1.5 ${
+                      selectedStationFilter === st.id
+                        ? 'bg-amber-500 text-slate-950 shadow'
+                        : 'bg-slate-800 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <span>{st.name}</span>
+                  </button>
+                ))}
+              </div>
             </div>
 
-            {/* Search Input */}
+            {/* Search Bar */}
             <div className="relative">
-              <Search className="w-4 h-4 text-slate-500 absolute right-3.5 top-3" />
+              <Search className="w-4 h-4 text-slate-400 absolute right-3 top-3" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="گەڕان لە مینو (نێرگەلە، خواردنەوە، شەربەت، بەرگەر...)"
-                className="w-full bg-slate-900 border border-slate-800 rounded-xl pr-10 pl-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                placeholder="گەڕان بەدوای نێرگەلە، ساردی، پیتزا، شەربەت..."
+                className="w-full bg-slate-900 border border-slate-800 rounded-xl pr-9 pl-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
               />
             </div>
 
-            {/* Menu Items Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3.5">
-              {filteredItems.map((item) => {
-                const inCartCount = currentCart.find((c) => c.menuItemId === item.id)?.quantity || 0;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => handleAddItemToCart(item)}
-                    className="p-2.5 bg-slate-900 border border-slate-800 hover:border-amber-500/60 rounded-2xl text-right transition flex flex-col justify-between group relative active:scale-95 shadow-md overflow-hidden"
-                  >
-                    {inCartCount > 0 && (
-                      <span className="absolute top-2 left-2 z-10 w-7 h-7 rounded-full bg-amber-500 text-slate-950 font-black text-xs flex items-center justify-center shadow-lg border-2 border-slate-900">
-                        {inCartCount}
-                      </span>
+            {/* Menu Items Grid with Photos */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+              {filteredItems.map((item) => (
+                <div
+                  key={item.id}
+                  onClick={() => handleAddItemToCart(item)}
+                  className="bg-slate-900 border border-slate-800 hover:border-amber-500/60 rounded-2xl overflow-hidden cursor-pointer transition-all transform active:scale-95 shadow-md flex flex-col"
+                >
+                  {/* Item Image */}
+                  <div className="h-28 w-full bg-slate-800 relative overflow-hidden">
+                    {item.image ? (
+                      <img
+                        src={item.image}
+                        alt={item.name}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-slate-600">
+                        {item.stationId === 'nargile' ? (
+                          <Flame className="w-8 h-8 text-amber-500/40" />
+                        ) : item.stationId === 'cold' ? (
+                          <Coffee className="w-8 h-8 text-cyan-500/40" />
+                        ) : (
+                          <Utensils className="w-8 h-8 text-emerald-500/40" />
+                        )}
+                      </div>
                     )}
+                    <span className="absolute bottom-2 right-2 px-2 py-0.5 rounded-md bg-slate-950/80 backdrop-blur-sm text-[10px] font-medium text-amber-400">
+                      {item.category}
+                    </span>
+                  </div>
 
-                    {/* Item Image */}
-                    <div className="w-full h-28 rounded-xl overflow-hidden bg-slate-800 mb-2 relative">
-                      {item.image ? (
-                        <img
-                          src={item.image}
-                          alt={item.name}
-                          className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-slate-600">
-                          {item.stationId === 'nargile' && <Flame className="w-8 h-8 text-amber-500/40" />}
-                          {item.stationId === 'cold' && <Coffee className="w-8 h-8 text-cyan-500/40" />}
-                          {item.stationId === 'kitchen' && <Utensils className="w-8 h-8 text-emerald-500/40" />}
-                        </div>
-                      )}
-                      <span className="absolute bottom-1 right-1 text-[10px] bg-slate-950/80 backdrop-blur px-2 py-0.5 rounded-md text-amber-300 font-medium">
+                  {/* Item Details */}
+                  <div className="p-3 flex-1 flex flex-col justify-between">
+                    <div>
+                      <h4 className="font-bold text-xs text-white line-clamp-1">{item.name}</h4>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
                         {getStationName(item.stationId)}
-                      </span>
+                      </p>
                     </div>
 
-                    <div className="space-y-1 w-full">
-                      <h4 className="font-bold text-xs text-white group-hover:text-amber-400 line-clamp-1">
-                        {item.name}
-                      </h4>
-                    </div>
-
-                    <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 w-full mt-1.5">
-                      <span className="text-xs font-black text-amber-400 font-mono">
+                    <div className="pt-2 mt-2 border-t border-slate-800/80 flex items-center justify-between">
+                      <span className="font-bold text-xs text-amber-400 font-mono">
                         {item.price.toLocaleString()} {settings.currency}
                       </span>
-                      <span className="p-1 rounded-lg bg-slate-800 group-hover:bg-amber-500 group-hover:text-slate-950 text-slate-400 transition">
-                        <Plus className="w-3.5 h-3.5" />
-                      </span>
+                      <button
+                        type="button"
+                        className="w-7 h-7 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center justify-center font-bold"
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
                     </div>
-                  </button>
-                );
-              })}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 
-          {/* Cart Sidebar for Tablet (Right side) */}
+          {/* Cart Sidebar */}
           <div className="w-full lg:w-96 bg-slate-900 border-t lg:border-t-0 lg:border-r border-slate-800 flex flex-col h-auto lg:h-[calc(100vh-65px)]">
             {/* Cart Header */}
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <ShoppingBag className="w-5 h-5 text-amber-400" />
-                <h3 className="font-bold text-sm text-white">
-                  داواکارییەکانی {selectedTable.name}
+            <div className="p-4 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                  <ShoppingBag className="w-4 h-4 text-amber-400" />
+                  <span>داواکارییەکانی {selectedTable.name}</span>
                 </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  گارسۆن: <span className="text-amber-400 font-bold">{loggedInWaiter.name}</span>
+                </p>
               </div>
-              <span className="text-xs font-mono text-slate-400">
-                {currentCart.reduce((sum, i) => sum + i.quantity, 0)} دانە
-              </span>
+
+              <div className="flex items-center gap-1.5 bg-slate-900 px-2 py-1 rounded-lg border border-slate-800 text-xs">
+                <span className="text-slate-400 text-[11px]">میوان:</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="30"
+                  value={guestCount}
+                  onChange={(e) => setGuestCount(parseInt(e.target.value) || 1)}
+                  className="w-10 bg-transparent text-center font-bold text-white focus:outline-none"
+                />
+              </div>
             </div>
 
+            {/* Request Bill Button in Cart for active occupied table */}
+            {selectedTable.status === 'occupied' && (
+              <div className="p-3 bg-amber-500/10 border-b border-amber-500/20">
+                <button
+                  type="button"
+                  onClick={() => handleRequestBill(selectedTable)}
+                  className="w-full py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-md transition"
+                >
+                  <Receipt className="w-4 h-4" />
+                  <span>داواکردنی وەسڵ لە کاشێر (داوای حساب)</span>
+                </button>
+              </div>
+            )}
+
             {/* Cart Items List */}
-            <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
+            <div className="flex-1 overflow-y-auto p-3 space-y-2.5 max-h-72 lg:max-h-none">
               {currentCart.length === 0 ? (
                 <div className="h-48 lg:h-full flex flex-col items-center justify-center text-center text-slate-500 p-4">
                   <ShoppingBag className="w-12 h-12 stroke-1 mb-2 text-slate-600" />
@@ -659,7 +735,7 @@ export const WaiterTabletView: React.FC<WaiterTabletViewProps> = ({
                   className="px-3 py-3 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-xl"
                   title="سڕینەوەی کارت"
                 >
-                  <RotateCcw className="w-4 h-4" />
+                  <Trash2 className="w-4 h-4" />
                 </button>
               </div>
             </div>

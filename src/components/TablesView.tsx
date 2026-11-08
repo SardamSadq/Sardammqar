@@ -10,6 +10,8 @@ import {
   AlertCircle,
   Tablet,
   Laptop,
+  Receipt,
+  Printer,
 } from 'lucide-react';
 import { playClickSound } from '../services/audio';
 
@@ -20,6 +22,7 @@ interface TablesViewProps {
   onSelectTable: (table: TableItem) => void;
   onAddTable: (name: string, hall: string, capacity: number) => void;
   onDeleteTable: (tableId: number) => void;
+  onQuickPrintReceipt?: (table: TableItem) => void;
 }
 
 export const TablesView: React.FC<TablesViewProps> = ({
@@ -29,6 +32,7 @@ export const TablesView: React.FC<TablesViewProps> = ({
   onSelectTable,
   onAddTable,
   onDeleteTable,
+  onQuickPrintReceipt,
 }) => {
   const [selectedHall, setSelectedHall] = useState<string>('all');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -211,10 +215,17 @@ export const TablesView: React.FC<TablesViewProps> = ({
                     <span className="text-xs font-black text-amber-400 font-mono">
                       {order.total.toLocaleString()} {settings.currency}
                     </span>
-                    <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 font-bold border border-rose-500/30 flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
-                      پڕە
-                    </span>
+                    {isBilling ? (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/25 text-rose-300 font-black border border-rose-500/40 flex items-center gap-1 animate-pulse">
+                        <Receipt className="w-3 h-3" />
+                        داوای وەسڵ
+                      </span>
+                    ) : (
+                      <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 font-bold border border-rose-500/30 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+                        پڕە
+                      </span>
+                    )}
                   </>
                 ) : (
                   <>
@@ -228,6 +239,24 @@ export const TablesView: React.FC<TablesViewProps> = ({
                   </>
                 )}
               </div>
+
+              {/* Quick Print Receipt Button on Table Card if billing requested */}
+              {isBilling && order && onQuickPrintReceipt && (
+                <div className="pt-2 mt-1 border-t border-rose-500/20">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onQuickPrintReceipt(table);
+                    }}
+                    className="w-full py-1.5 px-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 active:scale-95 text-slate-950 font-black rounded-xl text-[11px] flex items-center justify-center gap-1.5 shadow-md transition"
+                    title="چاپکردنی دەستبەجێی پسوڵەی وەسڵ تا گارسۆن بیبات بۆ سەر ئەم مێزە"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>چاپکردنی وەسڵ بۆ گارسۆن</span>
+                  </button>
+                </div>
+              )}
             </div>
           );
         })}

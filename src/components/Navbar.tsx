@@ -12,8 +12,10 @@ import {
   Volume2,
   VolumeX,
   Coffee,
+  Lock,
+  UserCheck,
 } from 'lucide-react';
-import { CafeteriaSettings } from '../types';
+import { CafeteriaSettings, Staff } from '../types';
 import { playOrderSound, playCashSound } from '../services/audio';
 
 export type ActiveTab = 'tables' | 'kitchen' | 'reports' | 'menu' | 'staff' | 'printers';
@@ -22,6 +24,8 @@ interface NavbarProps {
   activeTab: ActiveTab;
   onTabChange: (tab: ActiveTab) => void;
   settings: CafeteriaSettings;
+  activeCashier?: Staff | null;
+  onLockCashier?: () => void;
   onOpenQrModal: () => void;
   onSwitchToWaiterTablet?: () => void;
   onOpenDesktopModal?: () => void;
@@ -34,6 +38,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   onTabChange,
   settings,
+  activeCashier,
+  onLockCashier,
   onOpenQrModal,
   pendingKitchenCount,
   soundEnabled,
@@ -55,9 +61,20 @@ export const Navbar: React.FC<NavbarProps> = ({
                   لاپتۆپ و کاشێر
                 </span>
               </h1>
-              <p className="text-[11px] text-slate-400">
-                بەڕێوەبەر: {settings.ownerName || 'خاوەن'}
-              </p>
+              <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
+                <span>کاشێری سەرکار: <strong className="text-amber-400">{activeCashier?.name || 'کاشێر'}</strong></span>
+                {onLockCashier && (
+                  <button
+                    type="button"
+                    onClick={onLockCashier}
+                    className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-bold transition"
+                    title="قفڵکردنی سیستەم و دەرچوون بە پاسۆرد"
+                  >
+                    <Lock className="w-3 h-3 text-amber-400" />
+                    <span>قفڵکردن</span>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 

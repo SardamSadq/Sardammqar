@@ -37,6 +37,7 @@ interface CashierViewProps {
   stations: Station[];
   staffList: Staff[];
   settings: CafeteriaSettings;
+  activeCashier?: Staff | null;
   onClose: () => void;
   onSaveOrder: (order: Order, tableId: number) => void;
   onCompletePayment: (order: Order, tableId: number, cashReceived: number, change: number) => void;
@@ -49,6 +50,7 @@ export const CashierView: React.FC<CashierViewProps> = ({
   stations,
   staffList,
   settings,
+  activeCashier,
   onClose,
   onSaveOrder,
   onCompletePayment,
@@ -352,6 +354,16 @@ export const CashierView: React.FC<CashierViewProps> = ({
                 {items.reduce((s, i) => s + i.quantity, 0)} دانە
               </span>
             </div>
+
+            {/* Bill Requested Alert */}
+            {table.status === 'billing' && (
+              <div className="mx-3 mt-3 p-2.5 bg-rose-500/20 border border-rose-500/40 rounded-xl flex items-center justify-between text-xs text-rose-300 animate-pulse">
+                <div className="flex items-center gap-1.5 font-bold">
+                  <Receipt className="w-4 h-4 text-rose-400" />
+                  <span>کڕیار داوای وەسڵی کردووە (گارسۆن: {table.billRequestedByWaiter || order?.waiterName || 'گارسۆن'})</span>
+                </div>
+              </div>
+            )}
 
             {/* Items list */}
             <div className="flex-1 overflow-y-auto p-3 space-y-2">

@@ -26,7 +26,7 @@ import {
   resetAllData,
   INITIAL_SETTINGS,
 } from './services/storage';
-import { playCashSound, playOrderSound, playAlertSound, playClickSound } from './services/audio';
+import { playCashSound, playOrderSound, playAlertSound, playClickSound, playBillBellSound } from './services/audio';
 import { syncBus, SyncMessage } from './services/sync';
 
 // Components
@@ -42,7 +42,8 @@ import { ReportsView } from './components/ReportsView';
 import { LanPrinterSettings } from './components/LanPrinterSettings';
 import { QrCodeModal } from './components/QrCodeModal';
 import { ReceiptPrintView } from './components/ReceiptPrintView';
-import { Laptop, Bell } from 'lucide-react';
+import { PinLoginModal } from './components/PinLoginModal';
+import { Laptop, Bell, Receipt, Printer, X } from 'lucide-react';
 
 export default function App() {
   // Application Data States
@@ -76,6 +77,41 @@ export default function App() {
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [lastNotification, setLastNotification] = useState<string | null>(null);
+
+  // Active Cashier on Laptop
+  const [activeCashier, setActiveCashier] = useState<Staff | null>(() => {
+    if (typeof window !== 'undefined') {
+      const savedId = sessionStorage.getItem('cafeteria_cashier_id');
+      if (savedId) {
+        const list = getStaffList();
+        const found = list.find((s) => s.id === savedId && s.active);
+        if (found) return found;
+      }
+    }
+    return null;
+  });
+
+  // Table Bill Request Banner on Laptop
+  const [billRequestedBanner, setBillRequestedBanner] = useState<{
+    tableId: number;
+    tableName: string;
+    waiterName: string;
+  } | null>(null);
+
+  const handleQuickPrintReceipt = (table: TableItem) => {
+    const order = orders.find((o) => o.tableId === table.id && o.status === 'active');
+    if (order) {
+      setReceiptToPrint(order);
+      if (soundEnabled) playCashSound();
+      syncBus.publish('BILL_PRINTED', 'laptop', {
+        tableId: table.id,
+        tableName: table.name,
+      });
+      setBillRequestedBanner((prev) => (prev?.tableId === table.id ? null : prev));
+    } else {
+      setSelectedTableForCashier(table);
+    }
+  };
 
   // Initial load: Fetch existing state from local LAN server (vital for waiter tablet)
   useEffect(() => {
@@ -178,6 +214,39 @@ export default function App() {
             t.id === targetId ? { ...t, currentDeviceActive: undefined } : t
           )
         );
+      } else if (msg.type === 'BILL_REQUESTED') {
+        const tableId = Number(msg.payload.tableId);
+        const tableName = (msg.payload.tableName as string) || `مێزی ${tableId}`;
+        const waiterName = (msg.payload.waiterName as string) || 'گارسۆن';
+
+        if (soundEnabled && currentMode === 'laptop') {
+          playBillBellSound();
+        }
+
+        // Set table to billing status
+        setTables((prev) =>
+          prev.map((t) =>
+            t.id === tableId
+              ? {
+                  ...t,
+                  status: 'billing',
+                  billRequestedByWaiter: waiterName,
+                  billRequestedAt: new Date().toISOString(),
+                }
+              : t
+          )
+        );
+
+        setBillRequestedBanner({
+          tableId,
+          tableName,
+          waiterName,
+        });
+
+        setLastNotification(`🔔 ${tableName} داوای وەسڵی کردووە لەلایەن ${waiterName}!`);
+      } else if (msg.type === 'BILL_PRINTED') {
+        const tableId = Number(msg.payload.tableId);
+        setBillRequestedBanner((prev) => (prev?.tableId === tableId ? null : prev));
       } else if (msg.type === 'DATA_RELOAD') {
         syncBus.fetchStateFromServer().then((serverState) => {
           if (serverState) {
@@ -368,19 +437,6 @@ export default function App() {
       {/* Main Switch: WAITER TABLET MODE vs LAPTOP POS MODE */}
       {currentMode === 'waiter' ? (
         <div className="relative min-h-screen">
-          {/* Switch back to Laptop POS Floating Button */}
-          <button
-            type="button"
-            onClick={() => {
-              playClickSound();
-              setCurrentMode('laptop');
-            }}
-            className="fixed bottom-4 left-4 z-40 bg-slate-900 hover:bg-slate-800 text-amber-400 border border-slate-700 px-3.5 py-2 rounded-xl text-xs font-bold shadow-xl flex items-center gap-1.5 transition"
-          >
-            <Laptop className="w-4 h-4" />
-            <span>گۆڕین بۆ لاپتۆپ و کاشێر</span>
-          </button>
-
           <WaiterTabletView
             tables={tables}
             menuItems={menuItems}
@@ -399,6 +455,22 @@ export default function App() {
       ) : (
         /* LAPTOP POS INTERFACE */
         <div className="flex-1 flex flex-col">
+          {/* If Cashier is not logged in with PIN, show Cashier Login Modal */}
+          {!activeCashier && (
+            <PinLoginModal
+              isOpen={true}
+              mode="cashier"
+              staffList={staffList}
+              cafeteriaName={settings.name}
+              onLogin={(cashier) => {
+                setActiveCashier(cashier);
+                try {
+                  sessionStorage.setItem('cafeteria_cashier_id', cashier.id);
+                } catch {}
+              }}
+            />
+          )}
+
           {/* Navbar */}
           <Navbar
             activeTab={activeTab}
@@ -407,6 +479,14 @@ export default function App() {
               setActiveTab(tab);
             }}
             settings={settings}
+            activeCashier={activeCashier}
+            onLockCashier={() => {
+              playClickSound();
+              try {
+                sessionStorage.removeItem('cafeteria_cashier_id');
+              } catch {}
+              setActiveCashier(null);
+            }}
             onOpenQrModal={() => setIsQrModalOpen(true)}
             pendingKitchenCount={pendingKitchenCount}
             soundEnabled={soundEnabled}
@@ -415,6 +495,62 @@ export default function App() {
               if (!soundEnabled) playCashSound();
             }}
           />
+
+          {/* High Priority Bill Requested Banner from Waiter Tablet */}
+          {billRequestedBanner && (
+            <div className="bg-gradient-to-r from-amber-600 via-orange-600 to-amber-600 text-white px-4 py-3 shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-3 border-b-2 border-amber-300 animate-in slide-in-from-top">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-black/20 flex items-center justify-center shrink-0">
+                  <Receipt className="w-6 h-6 text-amber-200 animate-bounce" />
+                </div>
+                <div className="text-right">
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-black text-sm">
+                      🔔 {billRequestedBanner.tableName} داوای وەسڵی کردووە!
+                    </h4>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-black/30 text-amber-200 font-bold">
+                      گارسۆن: {billRequestedBanner.waiterName}
+                    </span>
+                  </div>
+                  <p className="text-xs text-amber-100/90 mt-0.5">
+                    کڕیار لەسەر ئەم مێزەیە و داوای حسابی کردووە. تکایە پسوڵەکە چاپ بکە تا گارسۆن بیبات بۆ سەر مێزەکە.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const targetTable = tables.find((t) => t.id === billRequestedBanner.tableId);
+                    if (targetTable) handleQuickPrintReceipt(targetTable);
+                  }}
+                  className="px-4 py-2 bg-slate-950 hover:bg-slate-900 text-amber-400 font-black rounded-xl text-xs flex items-center gap-1.5 shadow-lg transition"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>چاپکردنی دەستبەجێی وەسڵ</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const targetTable = tables.find((t) => t.id === billRequestedBanner.tableId);
+                    if (targetTable) setSelectedTableForCashier(targetTable);
+                  }}
+                  className="px-3.5 py-2 bg-white/20 hover:bg-white/30 text-white font-bold rounded-xl text-xs transition"
+                >
+                  <span>کردنەوە لە کاشێر</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBillRequestedBanner(null)}
+                  className="p-2 hover:bg-black/20 rounded-xl text-white/80 hover:text-white transition"
+                  title="داخستنی ئەم ئاگادارییە"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Main Tab Content */}
           <main className="flex-1 p-4 md:p-6 max-w-7xl mx-auto w-full">
@@ -434,6 +570,7 @@ export default function App() {
                 }}
                 onAddTable={handleAddTable}
                 onDeleteTable={handleDeleteTable}
+                onQuickPrintReceipt={handleQuickPrintReceipt}
               />
             )}
 
@@ -505,6 +642,7 @@ export default function App() {
           stations={stations}
           staffList={staffList}
           settings={settings}
+          activeCashier={activeCashier}
           onClose={() => {
             syncBus.publish('TABLE_ACTIVE_CLOSE', 'laptop', {
               tableId: selectedTableForCashier.id,
