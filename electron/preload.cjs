@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('electronPOS', {
   isElectron: true,
   printReceipt: (options) => ipcRenderer.send('print-receipt', options),
   getLanServerInfo: () => ipcRenderer.invoke('get-lan-server-info'),
+  clearAppData: () => ipcRenderer.invoke('clear-app-data'),
   broadcastSync: (msg) => ipcRenderer.send('broadcast-sync', msg),
   onSyncEvent: (callback) => {
     const handler = (_event, data) => callback(data);

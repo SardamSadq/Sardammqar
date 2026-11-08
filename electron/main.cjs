@@ -344,6 +344,27 @@ if (!gotTheLock) {
     return getLanInfo();
   });
 
+  // IPC to clear storage and reset shared LAN state
+  ipcMain.handle('clear-app-data', async () => {
+    try {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        await mainWindow.webContents.session.clearStorageData();
+      }
+      sharedState = {
+        settings: null,
+        tables: [],
+        menu: [],
+        stations: [],
+        orders: [],
+        staff: [],
+        printers: [],
+      };
+      return { success: true };
+    } catch (e) {
+      return { error: String(e) };
+    }
+  });
+
   // IPC to broadcast an event from laptop to all connected tablets
   ipcMain.on('broadcast-sync', (event, msg) => {
     broadcastEvent(msg);

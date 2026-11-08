@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Staff } from '../types';
-import { Lock, UserCheck, ShieldCheck, Delete, ArrowRight, Coffee, Tablet } from 'lucide-react';
+import { Lock, UserCheck, ShieldCheck, Delete, ArrowRight, Coffee, Tablet, RotateCcw } from 'lucide-react';
 import { playClickSound, playAlertSound } from '../services/audio';
 
 interface PinLoginModalProps {
@@ -10,6 +10,7 @@ interface PinLoginModalProps {
   cafeteriaName: string;
   onLogin: (staff: Staff) => void;
   onCancel?: () => void;
+  onResetToSetup?: () => void;
 }
 
 export const PinLoginModal: React.FC<PinLoginModalProps> = ({
@@ -19,6 +20,7 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
   cafeteriaName,
   onLogin,
   onCancel,
+  onResetToSetup,
 }) => {
   // Filter staff based on mode
   const eligibleStaff = staffList.filter((s) => {
@@ -221,8 +223,15 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
             </button>
           </div>
 
+          {/* Default PIN Hint */}
+          <div className="text-[11px] text-slate-500 text-center select-none">
+            {mode === 'cashier'
+              ? 'پاسۆردی بنەڕەتی کاشێر: 0000'
+              : 'پاسۆردی بنەڕەتی گارسۆن: 1111 یان 2222'}
+          </div>
+
           {/* Confirm Button */}
-          <div className="pt-2 flex gap-2">
+          <div className="pt-1 flex gap-2">
             {onCancel && (
               <button
                 type="button"
@@ -241,6 +250,28 @@ export const PinLoginModal: React.FC<PinLoginModalProps> = ({
               <span>چوونەژوورەوە</span>
             </button>
           </div>
+
+          {/* Reset to Setup / Reactivate for Laptop */}
+          {onResetToSetup && mode === 'cashier' && (
+            <div className="pt-3 border-t border-slate-800/80 text-center">
+              <button
+                type="button"
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      'ئایا دڵنیایت دەتەوێت داتاکانی ئەم لاپتۆپە سفر بکەیتەوە و بچیتەوە سەر لاپەڕەی کاراکردن و ئەکتیڤکردنی نوێ؟'
+                    )
+                  ) {
+                    onResetToSetup();
+                  }
+                }}
+                className="text-xs text-amber-400 hover:text-amber-300 underline underline-offset-4 flex items-center justify-center gap-1.5 mx-auto font-medium transition py-1"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>کاراکردن لەسەر لاپتۆپێکی نوێ یان ریستکردنەوە بۆ لاپەڕەی ئەکتیڤکردن</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

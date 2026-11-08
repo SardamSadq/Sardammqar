@@ -14,6 +14,7 @@ import {
   Coffee,
   Lock,
   UserCheck,
+  RotateCcw,
 } from 'lucide-react';
 import { CafeteriaSettings, Staff } from '../types';
 import { playOrderSound, playCashSound } from '../services/audio';
@@ -29,6 +30,7 @@ interface NavbarProps {
   onOpenQrModal: () => void;
   onSwitchToWaiterTablet?: () => void;
   onOpenDesktopModal?: () => void;
+  onResetData?: () => void;
   pendingKitchenCount: number;
   soundEnabled: boolean;
   onToggleSound: () => void;
@@ -41,6 +43,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   activeCashier,
   onLockCashier,
   onOpenQrModal,
+  onResetData,
   pendingKitchenCount,
   soundEnabled,
   onToggleSound,
@@ -187,6 +190,26 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
           </button>
+
+          {/* System Reset & Reactivate button */}
+          {onResetData && (
+            <button
+              type="button"
+              onClick={() => {
+                if (
+                  window.confirm(
+                    'ئایا دڵنیایت دەتەوێت داتاکانی ئەم لاپتۆپە سفر بکەیتەوە و بگەڕێیتەوە بۆ لاپەڕەی کاراکردن و ئەکتیڤکردنی نوێ؟'
+                  )
+                ) {
+                  onResetData();
+                }
+              }}
+              className="p-2 rounded-xl border border-slate-800 bg-slate-900 text-slate-400 hover:text-rose-400 hover:border-rose-900/60 transition"
+              title="ریستکردنەوە و کاراکردنی نوێ لەسەر لاپتۆپ"
+            >
+              <RotateCcw className="w-4 h-4" />
+            </button>
+          )}
 
           {/* QR Code Modal for Waiter Tablet */}
           <button

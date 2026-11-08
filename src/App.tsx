@@ -400,9 +400,20 @@ export default function App() {
     saveStations(updated);
   };
 
-  // Reset entire system to blank slate
-  const handleResetData = () => {
+  // Reset entire system to blank slate & prompt activation
+  const handleResetData = async () => {
     resetAllData();
+    try {
+      sessionStorage.clear();
+    } catch {}
+    if ((window as any).electronPOS?.clearAppData) {
+      try {
+        await (window as any).electronPOS.clearAppData();
+      } catch (err) {
+        console.error('Failed to clear electron app data', err);
+      }
+    }
+    setActiveCashier(null);
     setSettings(INITIAL_SETTINGS);
     setTables([]);
     setOrders([]);
@@ -468,6 +479,7 @@ export default function App() {
                   sessionStorage.setItem('cafeteria_cashier_id', cashier.id);
                 } catch {}
               }}
+              onResetToSetup={handleResetData}
             />
           )}
 
@@ -488,6 +500,7 @@ export default function App() {
               setActiveCashier(null);
             }}
             onOpenQrModal={() => setIsQrModalOpen(true)}
+            onResetData={handleResetData}
             pendingKitchenCount={pendingKitchenCount}
             soundEnabled={soundEnabled}
             onToggleSound={() => {
